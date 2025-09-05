@@ -36,6 +36,8 @@ import {
   LLMsBenchmarkData,
   METRIC_DISPLAY_HEADERS,
   METRIC_DISPLAY_SHORT_HEADERS,
+  DEFAULT_ARCH_NAME,
+  DEFAULT_MODE_NAME,
 } from "lib/benchmark/llms/common";
 import {
   computeSpeedup,
@@ -44,6 +46,7 @@ import {
 import {
   computeGeomean,
   useBenchmark,
+  getLLMsBenchmarkPropsQueryParameter,
 } from "lib/benchmark/llms/utils/llmUtils";
 import { BranchAndCommit } from "lib/types";
 
@@ -61,6 +64,7 @@ export default function LLMsGraphPanel({
   metricNames,
   lBranchAndCommit,
   rBranchAndCommit,
+  repos,
 }: {
   queryParams: { [key: string]: any };
   granularity: Granularity;
@@ -73,30 +77,85 @@ export default function LLMsGraphPanel({
   metricNames: string[];
   lBranchAndCommit: BranchAndCommit;
   rBranchAndCommit: BranchAndCommit;
+  repos?: string[];
 }) {
-  // Do not set the commit here to query all the records in the time range to
-  // draw a chart
-  const { data, error } = useBenchmark(queryParams, {
-    branch: rBranchAndCommit.branch,
-    commit: "",
-  });
+  const isCompare = !!(repos && repos.length > 1);
 
-  if (data === undefined || data.length === 0) {
-    return (
-      <Stack direction="row" spacing={2} sx={{ mb: 2 }}>
-        <Typography fontSize={"1rem"} fontStyle={"italic"}>
-          Loading chart for {modelName}...
-        </Typography>
-      </Stack>
+  // For comparison mode, fetch data for both repos; otherwise just one
+  let dataWithSpeedup: any[] = [];
+  if (isCompare) {
+    const repoQueryParams = repos.map((r) =>
+      getLLMsBenchmarkPropsQueryParameter({
+        repoName: r,
+        benchmarkName,
+        modelName,
+        backendName,
+        modeName: DEFAULT_MODE_NAME,
+        dtypeName,
+        deviceName,
+        archName: DEFAULT_ARCH_NAME,
+        startTime: dayjs(queryParams["startTime"]),
+        stopTime: dayjs(queryParams["stopTime"]),
+        timeRange: 0,
+        granularity: granularity,
+        lCommit: "",
+        rCommit: "",
+        lBranch: rBranchAndCommit.branch,
+        rBranch: rBranchAndCommit.branch,
+        repos: repos,
+      } as any)
+    );
+
+    const hooks = repoQueryParams.map((qp) =>
+      useBenchmark(qp, { branch: rBranchAndCommit.branch, commit: "" })
+    );
+    const datasets = hooks.map((h) => h.data).filter(Boolean) as any[];
+    if (datasets.length !== repos.length || datasets.some((d) => d.length === 0)) {
+      return (
+        <Stack direction="row" spacing={2} sx={{ mb: 2 }}>
+          <Typography fontSize={"1rem"} fontStyle={"italic"}>
+            Loading chart for {modelName}...
+          </Typography>
+        </Stack>
+      );
+    }
+
+    const tagged = datasets.flatMap((d: any, i: number) =>
+      d.map((rec: any) => ({
+        ...rec,
+        extra: { ...(rec.extra || {}), source_repo: repos[i] },
+      }))
+    );
+    dataWithSpeedup = computeSpeedup(
+      repoName,
+      computeSpeedup(repoName, tagged, false, true),
+      true,
+      false
+    );
+  } else {
+    // Do not set the commit here to query all the records in the time range to draw a chart
+    const { data } = useBenchmark(queryParams, {
+      branch: rBranchAndCommit.branch,
+      commit: "",
+    });
+
+    if (data === undefined || data.length === 0) {
+      return (
+        <Stack direction="row" spacing={2} sx={{ mb: 2 }}>
+          <Typography fontSize={"1rem"} fontStyle={"italic"}>
+            Loading chart for {modelName}...
+          </Typography>
+        </Stack>
+      );
+    }
+
+    dataWithSpeedup = computeSpeedup(
+      repoName,
+      computeSpeedup(repoName, data, false, true),
+      true,
+      false
     );
   }
-
-  const dataWithSpeedup = computeSpeedup(
-    repoName,
-    computeSpeedup(repoName, data, false, true),
-    true,
-    false
-  );
 
   // Clamp to the nearest granularity (e.g. nearest hour) so that the times will
   // align with the data we get from the database
@@ -128,6 +187,7 @@ export default function LLMsGraphPanel({
             .filter((record: LLMsBenchmarkData) => {
               const id = record.workflow_id;
               return (
+                isCompare ||
                 (id >= lWorkflowId && id <= rWorkflowId) ||
                 (id <= lWorkflowId && id >= rWorkflowId) ||
                 (lWorkflowId === undefined && rWorkflowId === undefined) ||
@@ -158,6 +218,7 @@ export default function LLMsGraphPanel({
             .filter((record: LLMsBenchmarkData) => {
               const id = record.workflow_id;
               return (
+                isCompare ||
                 (id >= lWorkflowId && id <= rWorkflowId) ||
                 (id <= lWorkflowId && id >= rWorkflowId) ||
                 (lWorkflowId === undefined && rWorkflowId === undefined)
@@ -168,10 +229,10 @@ export default function LLMsGraphPanel({
               const dtype = record.dtype;
               const device = record.device;
               const metric = record.metric;
-
+              const srcRepo = (record as any)?.extra?.["source_repo"] || repoName;
               if (
-                repoName === "vllm-project/vllm" ||
-                repoName === "sgl-project/sglang"
+                srcRepo === "vllm-project/vllm" ||
+                srcRepo === "sgl-project/sglang"
               ) {
                 const requestRate = record.extra!["request_rate"];
                 const tensorParallel = record.extra!["tensor_parallel_size"];
@@ -212,7 +273,7 @@ export default function LLMsGraphPanel({
             });
     const graphItems = formGraphItem(chartData[metric]);
     // group by timestamp to identify devices with the same timestamp
-    graphSeries[metric] = seriesWithInterpolatedTimes(
+    let series = seriesWithInterpolatedTimes(
       graphItems,
       startTime,
       stopTime,
@@ -222,6 +283,9 @@ export default function LLMsGraphPanel({
       "actual",
       false
     );
+
+    // Keep all lines solid; repo is indicated in label suffix ("/ sglang" or "/ vllm").
+    graphSeries[metric] = series;
   });
 
   // find the metric with the longest data array, it is used as baseline for rows and mapping in the table.
@@ -475,15 +539,21 @@ const MetricTable = ({
 function formGraphItem(data: any[]) {
   const res: any[] = [];
   data.forEach((item) => {
-    const deviceId = item?.metadata_info?.device_id;
+    // Prefer minimal fields from geomean output; fall back to full objects for raw rows
+    const deviceId = item?.deviceId ?? item?.metadata_info?.device_id;
     const displayName = item.display;
+    const repo = item?.repoTag ?? (item?.extra?.["source_repo"] as string | undefined);
+    const repoPrefix = repo?.includes("sglang")
+      ? "sglang / "
+      : repo?.includes("vllm")
+      ? "vllm / "
+      : "";
     const group_key =
       deviceId && deviceId !== ""
-        ? `${displayName} (${deviceId})`
-        : displayName;
-    const seriesData = deepClone(item);
-    seriesData.group_key = group_key;
-    res.push(seriesData);
+        ? `${repoPrefix}${displayName} (${deviceId})`
+        : `${repoPrefix}${displayName}`;
+    // Use shallow copy to avoid heavy deep clone cost
+    res.push({ ...item, group_key });
   });
   return res;
 }
