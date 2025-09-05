@@ -145,6 +145,7 @@ export function combineLeftAndRight(
 
 export function computeGeomean(data: LLMsBenchmarkData[], metricName: string) {
   const metricValues: { [key: string]: number[] } = {};
+  const representative: { [key: string]: LLMsBenchmarkData } = {};
   const returnedGeomean: LLMsBenchmarkData[] = [];
 
   data.forEach((r: LLMsBenchmarkData) => {
@@ -156,6 +157,7 @@ export function computeGeomean(data: LLMsBenchmarkData[], metricName: string) {
     const k = `${r.granularity_bucket}+${r.workflow_id}+${r.job_id}+${r.backend}+${r.dtype}+${origins}+${r.device}+${r.arch}+${r.metric}`;
     if (!(k in metricValues)) {
       metricValues[k] = [];
+      representative[k] = r;
     }
 
     if (r.actual !== 0) {
@@ -176,6 +178,9 @@ export function computeGeomean(data: LLMsBenchmarkData[], metricName: string) {
       arch,
       metric,
     ] = k.split("+");
+
+    const rep = representative[k];
+
     returnedGeomean.push({
       granularity_bucket: bucket,
       model: "",
@@ -189,6 +194,9 @@ export function computeGeomean(data: LLMsBenchmarkData[], metricName: string) {
       dtype: dtype,
       device: device,
       arch: arch,
+      // Preserve repo/device metadata for downstream labeling
+      extra: rep?.extra,
+      metadata_info: rep?.metadata_info,
     });
   });
   return returnedGeomean;
