@@ -539,9 +539,10 @@ const MetricTable = ({
 function formGraphItem(data: any[]) {
   const res: any[] = [];
   data.forEach((item) => {
-    const deviceId = item?.metadata_info?.device_id;
+    // Prefer minimal fields from geomean output; fall back to full objects for raw rows
+    const deviceId = item?.deviceId ?? item?.metadata_info?.device_id;
     const displayName = item.display;
-    const repo = item?.extra?.["source_repo"] as string | undefined;
+    const repo = item?.repoTag ?? (item?.extra?.["source_repo"] as string | undefined);
     const repoPrefix = repo?.includes("sglang")
       ? "sglang / "
       : repo?.includes("vllm")
@@ -551,9 +552,8 @@ function formGraphItem(data: any[]) {
       deviceId && deviceId !== ""
         ? `${repoPrefix}${displayName} (${deviceId})`
         : `${repoPrefix}${displayName}`;
-    const seriesData = deepClone(item);
-    seriesData.group_key = group_key;
-    res.push(seriesData);
+    // Use shallow copy to avoid heavy deep clone cost
+    res.push({ ...item, group_key });
   });
   return res;
 }

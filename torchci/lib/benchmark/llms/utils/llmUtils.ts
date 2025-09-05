@@ -181,6 +181,12 @@ export function computeGeomean(data: LLMsBenchmarkData[], metricName: string) {
 
     const rep = representative[k];
 
+    // Extract only minimal fields needed for labeling to keep payloads small
+    const repoTag = (rep as any)?.extra?.["source_repo"] as string | undefined;
+    const deviceId = (rep as any)?.metadata_info?.["device_id"] as
+      | string
+      | undefined;
+
     returnedGeomean.push({
       granularity_bucket: bucket,
       model: "",
@@ -194,9 +200,9 @@ export function computeGeomean(data: LLMsBenchmarkData[], metricName: string) {
       dtype: dtype,
       device: device,
       arch: arch,
-      // Preserve repo/device metadata for downstream labeling
-      extra: rep?.extra,
-      metadata_info: rep?.metadata_info,
+      // Minimal metadata for downstream labeling
+      ...(repoTag ? { repoTag } : {}),
+      ...(deviceId ? { deviceId } : {}),
     });
   });
   return returnedGeomean;
