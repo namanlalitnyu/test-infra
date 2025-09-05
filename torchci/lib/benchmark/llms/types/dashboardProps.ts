@@ -36,4 +36,5 @@ export interface LLMsBenchmarkProps {
   rCommit: string;
   lBranch: string;
   rBranch: string;
+  repos: string[];
 }

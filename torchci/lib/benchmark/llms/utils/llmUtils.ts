@@ -96,6 +96,7 @@ export function getLLMsBenchmarkPropsQueryParameter(props: LLMsBenchmarkProps) {
     repo: props.repoName,
     startTime: dayjs(props.startTime).utc().format("YYYY-MM-DDTHH:mm:ss.SSS"),
     stopTime: dayjs(props.stopTime).utc().format("YYYY-MM-DDTHH:mm:ss.SSS"),
+    repos: props.repos,
   };
   return queryParams;
 }
@@ -276,6 +277,15 @@ const toRowData = (
     const hasL = "l" in record;
     const hasR = "r" in record;
 
+    // Parse extra info once to extract repo, vLLM fields, etc.
+    let extraInfo: any = {};
+    try {
+      extraInfo = JSON.parse(extra);
+    } catch {}
+
+    // Prefer source repo embedded in extra info if present
+    const sourceRepo = extraInfo["source_repo"] || repoName;
+
     if (!("metadata" in row)) {
       row["metadata"] = {
         model: model,
@@ -312,9 +322,12 @@ const toRowData = (
       arch: arch,
     };
 
-    if (repoName === "vllm-project/vllm" || repoName === "sgl-project/sglang") {
+    // Attach source repo for downstream consumers (summary/links)
+    row["sourceRepo"] = sourceRepo;
+    row["repo_name"] = sourceRepo;
+
+    if (sourceRepo === "vllm-project/vllm" || sourceRepo === "sgl-project/sglang") {
       // These fields are only available on vLLM benchmark
-      const extraInfo = JSON.parse(extra);
       row["extra"] = extraInfo;
       row["tensor_parallel_size"] = extraInfo["tensor_parallel_size"];
       row["request_rate"] = extraInfo["request_rate"];
@@ -330,7 +343,6 @@ const toRowData = (
       repoName === "pytorch/pytorch" &&
       benchmarkName === "TorchCache Benchmark"
     ) {
-      const extraInfo = JSON.parse(extra);
       row["is_dynamic"] = extraInfo["is_dynamic"];
     }
 
